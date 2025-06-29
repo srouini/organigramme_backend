@@ -1,0 +1,68 @@
+# Logiflow V2 Backend Structure
+
+This document outlines the structure of the Logiflow V2 backend project.
+
+## Overview
+
+The project is built using the **Django** framework and provides both **REST** and **GraphQL** APIs. It follows a modular design with several distinct Django apps handling different functionalities. The project appears to be containerized using **Docker** for deployment. A key feature is the **dynamic generation** of API endpoints based on the Django models.
+
+## Core Technologies
+
+*   **Framework**: Django
+*   **Database**: SQLite (development), likely PostgreSQL or similar in production (based on typical Docker setups)
+*   **API**:
+    *   Django REST Framework (DRF) - Dynamically generated ViewSets.
+    *   Graphene-Django - Dynamically generated GraphQL schema.
+*   **Deployment**: Docker, Nginx (likely as a reverse proxy)
+*   **Dependencies**: Managed via `requirements.txt`.
+
+## Project Root Directory Structure
+
+*   `/authentication/`: Django app for user authentication.
+*   `/bareme/`: Django app, likely related to pricing scales or tariffs ("barème").
+*   `/billing/`: Django app for billing functionalities.
+*   `/data/`: Django app, likely containing core data models (MRN, Article, CompanySettings, etc.).
+*   `/mediafiles/`: Directory for user-uploaded media files (e.g., company logos).
+*   `/nginx/`: Configuration files for Nginx web server/reverse proxy.
+*   `/operation/`: Django app, purpose unclear from name alone, potentially operational tasks.
+*   `/reference/`: Django app, likely containing reference data models (Ports, Clients, Navires, etc.).
+*   `/src/`: Main project source code directory (see below).
+*   `/static/`: Directory for static assets (CSS, JS, images).
+*   `/venv/`: Python virtual environment.
+*   `Dockerfile`: Instructions for building the Docker image.
+*   `docker-compose.yml`: Configuration for running multi-container Docker applications.
+*   `entrypoint.sh`: Shell script executed when the Docker container starts.
+*   `manage.py`: Django's command-line utility.
+*   `requirements.txt`: List of Python package dependencies.
+*   `db.sqlite3`: Development SQLite database file.
+
+## `/src/` Directory Structure (Main Project Code)
+
+This directory contains the core Django project configuration and shared logic:
+
+*   `settings.py`: Django project settings (database, installed apps, middleware, etc.).
+*   `urls.py`: Root URL configuration, routing requests to apps and including dynamically generated API routes (REST & GraphQL).
+*   `schema.py`: Defines the GraphQL schema using Graphene-Django, utilizing dynamic generation functions.
+*   `dynamic_api.py` (or similar): Contains the core logic for dynamically generating DRF ViewSets and GraphQL types/resolvers based on Django models. This is a central piece of the project's architecture.
+*   `permissions.py`: Likely defines custom permission classes for API access control.
+*   `utils.py`, `methods.py`, `api_generator.py`: Contain utility functions, specific methods, and potentially more API generation logic used across the project.
+*   `wsgi.py`, `asgi.py`: Entry points for WSGI/ASGI compatible web servers.
+
+## Key Architectural Points
+
+*   **Modularity**: The project is well-organized into distinct Django apps based on functionality (data, reference, billing, authentication, etc.).
+*   **Dynamic API Generation**: A significant feature is the automatic generation of both REST and GraphQL API endpoints from Django models using custom logic in `dynamic_api.py` (and related files). This reduces boilerplate code for CRUD operations.
+*   **Dual APIs**: Provides both REST (via DRF) and GraphQL (via Graphene-Django) APIs, offering flexibility for different client needs.
+*   **Containerization**: Ready for deployment using Docker and Nginx.
+
+## Apps Overview
+
+*   **`data`**: Core business models (Mrn, Article, Conteneur, CompanySettings).
+*   **`reference`**: Models for reference data (Port, Navire, Client, Transitaire).
+*   **`bareme`**: Models likely related to pricing or fee structures (Regime, Bareme).
+*   **`billing`**: Models related to invoicing or billing processes.
+*   **`operation`**: Models potentially related to operational workflows or specific tasks.
+*   **`authentication`**: Handles user login, registration, and session/token management.
+*   **`auditlog`**: (Inferred) Likely integrates `django-auditlog` or similar for tracking model changes.
+
+This structure promotes maintainability by separating concerns into different apps and leveraging dynamic code generation for common API patterns.

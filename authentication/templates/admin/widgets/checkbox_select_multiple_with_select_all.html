@@ -1,0 +1,46 @@
+<div class="select-all-container" style="margin-bottom: 10px;">
+    <button type="button" class="select-all-button" onclick="toggleAllCheckboxes(this)" 
+            style="padding: 5px 10px; background-color: #447e9b; color: white; border: none; border-radius: 4px; cursor: pointer;">
+        Select All
+    </button>
+</div>
+<ul id="{{ widget.attrs.id }}_0" class="allowed-pages-checkboxes">
+{% for group, options, index in widget.optgroups %}
+    {% for option in options %}
+        <li style="list-style: none; margin: 3px 0;">
+            {% include option.template_name with widget=option %}
+            <label for="{{ option.attrs.id }}" style="margin-left: 5px;">
+                {{ option.label }}
+            </label>
+        </li>
+    {% endfor %}
+{% endfor %}
+</ul>
+
+<script>
+function toggleAllCheckboxes(button) {
+    const container = button.closest('div.field-allowed_pages');
+    const checkboxes = container.querySelectorAll('input[type="checkbox"]');
+    const isChecked = button.getAttribute('data-checked') !== 'true';
+    
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = isChecked;
+    });
+    
+    button.setAttribute('data-checked', isChecked);
+    button.textContent = isChecked ? 'Unselect All' : 'Select All';
+}
+
+// Add hover effect to the button
+document.addEventListener('DOMContentLoaded', function() {
+    const button = document.querySelector('.select-all-button');
+    if (button) {
+        button.addEventListener('mouseover', function() {
+            this.style.backgroundColor = '#2b5d76';
+        });
+        button.addEventListener('mouseout', function() {
+            this.style.backgroundColor = '#447e9b';
+        });
+    }
+});
+</script>

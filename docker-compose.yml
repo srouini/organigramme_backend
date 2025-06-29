@@ -1,0 +1,67 @@
+version: '3'
+
+services:
+
+  database:
+    container_name: logixpert_db
+    image: postgres:12.8
+    # make sur the the database starts whenever the system starts 
+    restart: always
+    environment:
+      - POSTGRES_DB=containers
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=1813830
+
+    #----- Production ------------
+    ports:
+      - "5432:5432"
+    command: -p 5432
+    #----- Développement ---------
+    # ports:
+    #   - "5436:5436" 
+    # command: -p 5436
+
+    volumes:
+      - pg_data:/var/lib/postgresql/data/
+    networks:
+      - main_net
+
+  web:
+    container_name: logixpert
+    build: .
+    restart: always
+
+    command: gunicorn src.wsgi:application --bind 0.0.0.0:8080
+    volumes:
+      - static:/home/project/static
+    expose:
+      - 8080
+      #- 8080
+    env_file:
+      - ./.env
+    depends_on:
+      - database
+
+    networks:
+      - main_net
+
+  nginx:
+
+    build: ./nginx
+    volumes:
+      - static:/home/project/static
+    ports:
+      - 5003:5003
+    depends_on:
+      - web
+
+    networks:
+      - main_net
+
+volumes:
+  pg_data:
+  static:
+
+networks:
+  main_net: 
+    driver: bridge 
