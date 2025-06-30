@@ -1,53 +1,32 @@
 from rest_framework import serializers
 from rest_flex_fields import FlexFieldsModelSerializer
-from .models import Grade, Organigram, Position, OrganigramEdge
+from .models import Grade, Organigram, Position, OrganigramEdge, Task
 
 
 class GradeSerializer(FlexFieldsModelSerializer):
     class Meta:
         model = Grade
-        fields = (
-            "id",
-            "name",
-            "level",
-            "color",
-            "description",
-            "created_at",
-            "updated_at",
-        )
+        fields = '__all__'
+        read_only_fields = ("created_at", "updated_at")
+
+class TaskSerializer(FlexFieldsModelSerializer):
+    class Meta:
+        model = Task
+        fields = '__all__'
         read_only_fields = ("created_at", "updated_at")
 
 
 class PositionSerializer(FlexFieldsModelSerializer):
     class Meta:
         model = Position
-        fields = (
-            "id",
-            "organigram",
-            "title",
-            "grade",
-            "level",
-            "color",
-            "position_x",
-            "position_y",
-            "tasks",
-            "created_at",
-            "updated_at",
-        )
+        fields = '__all__'
         read_only_fields = ("created_at", "updated_at")
 
 
 class OrganigramEdgeSerializer(FlexFieldsModelSerializer):
     class Meta:
         model = OrganigramEdge
-        fields = (
-            "id",
-            "organigram",
-            "source",
-            "target",
-            "edge_type",
-            "created_at",
-        )
+        fields = '__all__'
         read_only_fields = ("created_at",)
 
     def validate(self, data):
@@ -78,11 +57,11 @@ class OrganigramSerializer(FlexFieldsModelSerializer):
 
     class Meta:
         model = Organigram
-        fields = (
-            "id",
-            "name",
-            "state",
-            "created_at",
-            "updated_at",
-        )
+        fields = '__all__'
         read_only_fields = ("created_at", "updated_at")
+
+    def validate_name(self, value):
+        if Organigram.objects.filter(name__iexact=value).exclude(id=self.instance.id if self.instance else None).exists():
+            raise serializers.ValidationError("This name already exists.")
+        return value
+    

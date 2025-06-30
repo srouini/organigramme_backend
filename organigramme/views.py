@@ -5,13 +5,16 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_flex_fields.views import FlexFieldsMixin
-
-from .models import Grade, Organigram, Position, OrganigramEdge
+from .filters import OrganigramFilter, OrganigramEdgeFilter, GradeFilter, PositionFilter, TaskFilter
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.filters import SearchFilter, OrderingFilter
+from .models import Grade, Organigram, Position, OrganigramEdge, Task
 from .serializers import (
     GradeSerializer,
     OrganigramSerializer,
     PositionSerializer,
     OrganigramEdgeSerializer,
+    TaskSerializer,
 )
 
 
@@ -21,7 +24,9 @@ class GradeViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
     queryset = Grade.objects.all().order_by("level")
     serializer_class = GradeSerializer
     permission_classes = [IsAuthenticated]
-
+    filterset_class = GradeFilter
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    search_fields = ['name','level']
 
 class OrganigramViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
     """CRUD for Organigram model + tree auto‑organize."""
@@ -29,6 +34,10 @@ class OrganigramViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
     queryset = Organigram.objects.all()
     serializer_class = OrganigramSerializer
     permission_classes = [IsAuthenticated]
+    filterset_class = OrganigramFilter
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    search_fields = ['name','state']
+
 
     @action(detail=True, methods=["post"], url_path="auto-organize")
     def auto_organize(self, request, pk=None):
@@ -84,11 +93,27 @@ class OrganigramViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
         )
 
 
+class TaskViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
+    """CRUD for Position model + bulk update."""
+    queryset = Task.objects.all()
+    serializer_class = TaskSerializer
+    permission_classes = [IsAuthenticated]
+    filterset_class = TaskFilter
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    search_fields = ['description']
+
+
+
+    
 class PositionViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
     """CRUD for Position model + bulk update."""
 
     serializer_class = PositionSerializer
     permission_classes = [IsAuthenticated]
+    filterset_class = PositionFilter
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    search_fields = ['title','level']
+
 
     def get_queryset(self):
         organigram_id = self.request.query_params.get("organigram_id")
@@ -121,6 +146,9 @@ class OrganigramEdgeViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
 
     serializer_class = OrganigramEdgeSerializer
     permission_classes = [IsAuthenticated]
+    filterset_class = OrganigramEdgeFilter
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    search_fields = ['title','level']
 
     def get_queryset(self):
         organigram_id = self.request.query_params.get("organigram_id")
