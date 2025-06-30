@@ -1,3 +1,4 @@
+
 import os
 from pathlib import Path
 
@@ -125,7 +126,7 @@ DATABASES = {
         'NAME': 'organigramme',
         'HOST': 'localhost',
         'PORT': 5432,
-        'USER': 'rouini',
+        'USER': 'postgres',
         'PASSWORD': '1813830',
          
     }

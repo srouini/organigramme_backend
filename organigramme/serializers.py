@@ -22,6 +22,10 @@ class PositionSerializer(FlexFieldsModelSerializer):
         fields = '__all__'
         read_only_fields = ("created_at", "updated_at")
 
+        expandable_fields = {
+            "organigram": ("organigramme.serializers.OrganigramSerializer", {"many": False}),
+            "grade": ("organigramme.serializers.GradeSerializer", {"many": False}),
+        }
 
 class OrganigramEdgeSerializer(FlexFieldsModelSerializer):
     class Meta:
@@ -36,7 +40,8 @@ class OrganigramEdgeSerializer(FlexFieldsModelSerializer):
             raise serializers.ValidationError("A node can only have one parent")
 
         source = data["source"]
-        if source.level >= target.level:
+    
+        if source.grade.level > target.grade.level: 
             raise serializers.ValidationError("Parent must have a higher level than child")
 
         if (

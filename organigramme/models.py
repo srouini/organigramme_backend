@@ -43,17 +43,15 @@ class Position(models.Model):
     organigram = models.ForeignKey(Organigram, on_delete=models.CASCADE, related_name='positions')
     title = models.CharField(max_length=255)
     grade = models.ForeignKey(Grade,on_delete=models.CASCADE, related_name='grades',max_length=255)  # Store grade name
-    level = models.IntegerField(default=0)
-    color = models.CharField(max_length=7, default='#3B82F6')
     position_x = models.FloatField(default=0)
     position_y = models.FloatField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
-        ordering = ['level', 'title']
+        ordering = ['title']
         indexes = [
-            models.Index(fields=['organigram', 'level']),
+            models.Index(fields=['organigram']),
         ]
     
     def __str__(self):

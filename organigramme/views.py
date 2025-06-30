@@ -107,20 +107,21 @@ class TaskViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
     
 class PositionViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
     """CRUD for Position model + bulk update."""
-
+    queryset = Position.objects.all()
     serializer_class = PositionSerializer
+    permit_list_expands = ['organigram', 'grade']
     permission_classes = [IsAuthenticated]
     filterset_class = PositionFilter
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    search_fields = ['title','level']
+    search_fields = ['title']
 
 
-    def get_queryset(self):
-        organigram_id = self.request.query_params.get("organigram_id")
-        qs = Position.objects.all()
-        if organigram_id:
-            qs = qs.filter(organigram_id=organigram_id)
-        return qs.order_by("-created_at")
+    # def get_queryset(self):
+    #     organigram_id = self.request.query_params.get("organigram_id")
+    #     qs = Position.objects.all()
+    #     if organigram_id:
+    #         qs = qs.filter(organigram_id=organigram_id)
+    #     return qs.order_by("-created_at")
 
     @action(detail=False, methods=["post"], url_path="bulk-update")
     def bulk_update(self, request):
@@ -133,7 +134,7 @@ class PositionViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
 
         instances = [
             Position(
-                id=u["id"], position_x=u["position_x"], position_y=u["position_y"]
+                id=u["id"], position_x=u["x"], position_y=u["y"]
             )
             for u in updates
         ]
