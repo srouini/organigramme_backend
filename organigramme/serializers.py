@@ -1,7 +1,13 @@
 from rest_framework import serializers
 from rest_flex_fields import FlexFieldsModelSerializer
-from .models import Grade, Organigram, Position, OrganigramEdge, Task
+from .models import Grade, Organigram, Position, OrganigramEdge, Task, Mission, Competence
 
+class ParentPositionSerializer(serializers.ModelSerializer):
+    """Serializer for parent position to avoid recursion in PositionSerializer"""
+    class Meta:
+        model = Position
+        fields = ('id', 'title', 'grade', 'position_x', 'position_y')
+        read_only_fields = fields
 
 class GradeSerializer(FlexFieldsModelSerializer):
     class Meta:
@@ -15,17 +21,61 @@ class TaskSerializer(FlexFieldsModelSerializer):
         fields = '__all__'
         read_only_fields = ("created_at", "updated_at")
 
+        expandable_fields = {
+            "position": ("organigramme.serializers.PositionSerializer", {"many": False}),
+        }
 
-class PositionSerializer(FlexFieldsModelSerializer):
+class MissionSerializer(FlexFieldsModelSerializer):
     class Meta:
-        model = Position
+        model = Mission
         fields = '__all__'
         read_only_fields = ("created_at", "updated_at")
 
         expandable_fields = {
+            "position": ("organigramme.serializers.PositionSerializer", {"many": False}),
+        }
+
+
+class CompetenceSerializer(FlexFieldsModelSerializer):
+    class Meta:
+        model = Competence
+        fields = '__all__'
+        read_only_fields = ("created_at", "updated_at")
+
+        expandable_fields = {
+            "position": ("organigramme.serializers.PositionSerializer", {"many": False}),
+        }
+
+class PositionSerializer(FlexFieldsModelSerializer):
+    parent = serializers.SerializerMethodField(read_only=True)
+    
+    class Meta:
+        model = Position
+        fields = '__all__'
+        read_only_fields = ("created_at", "updated_at", "parent")
+
+        expandable_fields = {
             "organigram": ("organigramme.serializers.OrganigramSerializer", {"many": False}),
             "grade": ("organigramme.serializers.GradeSerializer", {"many": False}),
+            "parent": ("organigramme.serializers.ParentPositionSerializer", {"many": False}),
         }
+    
+    def get_parent(self, obj):
+        """
+        Get the parent position by finding the source of the edge
+        where this position is the target.
+        """
+        from .models import OrganigramEdge
+        edge = OrganigramEdge.objects.filter(
+            target=obj,
+            organigram=obj.organigram
+        ).select_related('source').first()
+        
+        if not edge:
+            return None
+            
+        # Use ParentPositionSerializer to avoid recursion
+        return ParentPositionSerializer(edge.source, context=self.context).data
 
 class OrganigramEdgeSerializer(FlexFieldsModelSerializer):
     class Meta:

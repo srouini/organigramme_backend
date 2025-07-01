@@ -9,6 +9,7 @@ class Grade(models.Model):
     name = models.CharField(max_length=255)
     level = models.IntegerField()
     color = models.CharField(max_length=7, default='#3B82F6')  # Hex color
+    category = models.CharField(max_length=20)  # Hex color
     description = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -42,7 +43,11 @@ class Organigram(models.Model):
 class Position(models.Model):
     organigram = models.ForeignKey(Organigram, on_delete=models.CASCADE, related_name='positions')
     title = models.CharField(max_length=255)
-    grade = models.ForeignKey(Grade,on_delete=models.CASCADE, related_name='grades',max_length=255)  # Store grade name
+    mission_principal = models.TextField()
+    formation = models.CharField(max_length=255,default="")
+    experience = models.CharField(max_length=255,default="")
+    grade = models.ForeignKey(Grade,on_delete=models.PROTECT, related_name='grades',max_length=255)  # Store grade name
+    quantity = models.IntegerField(default=1)
     position_x = models.FloatField(default=0)
     position_y = models.FloatField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -64,11 +69,36 @@ class Task(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
-        ordering = ['created_at']
+        ordering = ['-id']
     
     def __str__(self):
         return f"Task for {self.position.title}: {self.description[:20]}..."
+
+class Mission(models.Model):
+    position = models.ForeignKey(Position, on_delete=models.CASCADE, related_name='missions')
+    description = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
     
+    class Meta:
+        ordering = ['-id']
+    
+    def __str__(self):
+        return f"Task for {self.position.title}: {self.description[:20]}..."
+
+class Competence(models.Model):
+    position = models.ForeignKey(Position, on_delete=models.CASCADE, related_name='competences')
+    description = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-id']
+    
+    def __str__(self):
+        return f"Task for {self.position.title}: {self.description[:20]}..."
+
+
 
 class OrganigramEdge(models.Model):
     organigram = models.ForeignKey(Organigram, on_delete=models.CASCADE, related_name='edges')
