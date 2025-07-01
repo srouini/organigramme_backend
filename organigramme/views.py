@@ -143,7 +143,7 @@ class OrganigramViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
             for child in children_map.get(node_id, []):
                 queue.append((child, level + 1))
 
-        spacing_x, spacing_y = 350, 200
+        spacing_x, spacing_y = 400, 200
         updates = []
         with transaction.atomic():
             for level, node_ids in level_groups.items():

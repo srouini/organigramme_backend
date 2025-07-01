@@ -41,13 +41,15 @@ class Organigram(models.Model):
         return self.name
 
 class Position(models.Model):
-    organigram = models.ForeignKey(Organigram, on_delete=models.CASCADE, related_name='positions')
+    organigram = models.ForeignKey(Organigram, on_delete=models.PROTECT, related_name='positions')
     title = models.CharField(max_length=255)
     mission_principal = models.TextField()
+    abbreviation = models.CharField(max_length=255,null=True,blank=True)
     formation = models.CharField(max_length=255,default="")
     experience = models.CharField(max_length=255,default="")
     grade = models.ForeignKey(Grade,on_delete=models.PROTECT, related_name='grades',max_length=255)  # Store grade name
     quantity = models.IntegerField(default=1)
+    initial_node=models.BooleanField(default=False)
     position_x = models.FloatField(default=0)
     position_y = models.FloatField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
