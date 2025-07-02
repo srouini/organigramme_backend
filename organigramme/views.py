@@ -359,6 +359,66 @@ class PositionViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
                 {"detail": "Position not found"},
                 status=status.HTTP_404_NOT_FOUND
             )
+            
+    @action(detail=True, methods=['post'], url_path='clone')
+    def clone_position(self, request, pk=None):
+        """
+        Create a clone of the position with all its related data.
+        """
+        try:
+            with transaction.atomic():
+                # Get the original position
+                original_position = self.get_object()
+                
+                # Create a copy of the position
+                position_copy = Position.objects.get(id=original_position.id)
+                position_copy.pk = None
+                position_copy.title = f"{original_position.title} (Copie)"
+                position_copy.save()
+                
+                # Clone related missions
+                for mission in Mission.objects.filter(position=original_position):
+                    mission_copy = Mission.objects.get(id=mission.id)
+                    mission_copy.pk = None
+                    mission_copy.position = position_copy
+                    mission_copy.save()
+                
+                # Clone related competences
+                for competence in Competence.objects.filter(position=original_position):
+                    competence_copy = Competence.objects.get(id=competence.id)
+                    competence_copy.pk = None
+                    competence_copy.position = position_copy
+                    competence_copy.save()
+                
+                # Clone related tasks
+                for task in Task.objects.filter(position=original_position):
+                    task_copy = Task.objects.get(id=task.id)
+                    task_copy.pk = None
+                    task_copy.position = position_copy
+                    task_copy.save()
+                
+                # Clone the edge relationship if it exists
+                edge = OrganigramEdge.objects.filter(
+                    target=original_position,
+                    organigram=original_position.organigram
+                ).first()
+                
+                if edge:
+                    OrganigramEdge.objects.create(
+                        source=edge.source,
+                        target=position_copy,
+                        organigram=edge.organigram
+                    )
+                
+                # Return the cloned position
+                serializer = self.get_serializer(position_copy)
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+                
+        except Exception as e:
+            return Response(
+                {"detail": f"Error cloning position: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 class OrganigramEdgeViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
     """CRUD for OrganigramEdge model."""
