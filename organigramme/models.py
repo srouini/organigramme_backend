@@ -48,6 +48,7 @@ class Position(models.Model):
     formation = models.CharField(max_length=255,default="")
     experience = models.CharField(max_length=255,default="")
     grade = models.ForeignKey(Grade,on_delete=models.PROTECT, related_name='grades',max_length=255)  # Store grade name
+    category = models.CharField(max_length=20,blank=True,null=True)  # Hex color
     quantity = models.IntegerField(default=1)
     initial_node=models.BooleanField(default=False)
     position_x = models.FloatField(default=0)
