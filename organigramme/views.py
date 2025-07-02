@@ -111,54 +111,116 @@ class OrganigramViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="auto-organize")
     def auto_organize(self, request, pk=None):
-        """Auto‑organize positions into a tree layout."""
+        """Auto‑organize positions into a tree layout with children under parents."""
         organigram = self.get_object()
         positions = Position.objects.filter(organigram=organigram)
-        edges = OrganigramEdge.objects.filter(organigram=organigram)
+        edges = OrganigramEdge.objects.filter(organigram=organigram).select_related('source', 'target')
 
         if not positions.exists():
             return Response(
                 {"message": "No positions to organize"}, status=status.HTTP_200_OK
             )
 
-        # Discover roots & build adjacency
-        position_ids = set(positions.values_list("id", flat=True))
-        target_ids = set(edges.values_list("target_id", flat=True))
-        root_ids = position_ids - target_ids
-
+        # Build parent-child mappings
         children_map = {}
+        parent_map = {}
+        position_map = {p.id: p for p in positions}
+        
         for edge in edges:
-            children_map.setdefault(edge.source_id, []).append(edge.target_id)
+            if edge.source_id in position_map and edge.target_id in position_map:
+                children_map.setdefault(edge.source_id, []).append(edge.target_id)
+                parent_map[edge.target_id] = edge.source_id
 
-        # BFS per level
-        level_groups = {}
-        queue = [(root_id, 0) for root_id in root_ids]
-        visited = set()
-        while queue:
-            node_id, level = queue.pop(0)
-            if node_id in visited:
-                continue
-            visited.add(node_id)
-            level_groups.setdefault(level, []).append(node_id)
-            for child in children_map.get(node_id, []):
-                queue.append((child, level + 1))
+        # Find root nodes (nodes without parents)
+        root_ids = [p.id for p in positions if p.id not in parent_map]
+        
+        if not root_ids:
+            return Response(
+                {"message": "No root positions found (circular references may exist)"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        spacing_x, spacing_y = 400, 200
+        # Constants for spacing
+        NODE_WIDTH = 200  # Approximate width of a node in pixels
+        HORIZONTAL_PADDING = 100  # Minimum space between nodes
+        VERTICAL_SPACING = 250  # Vertical space between levels
+        
+        # Calculate positions using a tree-based approach
+        node_positions = {}
+        
+        def calculate_subtree_width(node_id):
+            """Calculate the width required for a subtree in units."""
+            if not children_map.get(node_id):
+                return 1  # Base unit for leaf nodes
+            
+            # Sum up all children's widths plus padding between them
+            children = children_map[node_id]
+            if not children:
+                return 1
+                
+            total = sum(calculate_subtree_width(child_id) for child_id in children)
+            # Add padding between children (N-1 gaps for N children)
+            return max(1, total + (len(children) - 1) * 0.5)
+
+        def position_node(node_id, x_offset, level):
+            """Recursively position nodes and return the next x_offset."""
+            node = position_map[node_id]
+            
+            if node_id in children_map and children_map[node_id]:
+                # This is a parent node with children
+                children = children_map[node_id]
+                
+                # Calculate positions of all children first
+                child_positions = []
+                current_x = x_offset
+                
+                for child_id in children:
+                    child_width = calculate_subtree_width(child_id)
+                    current_x = position_node(child_id, current_x, level + 1)
+                    child_positions.append((child_id, current_x - child_width / 2))
+                    current_x += 0.5  # Add padding between children
+                
+                # Position this node centered over its children
+                if child_positions:
+                    first_child_x = child_positions[0][1]
+                    last_child_x = child_positions[-1][1] + calculate_subtree_width(children[-1])
+                    node_x = (first_child_x + last_child_x) / 2
+                else:
+                    node_x = x_offset
+                
+                node_positions[node_id] = (node_x, level * VERTICAL_SPACING + 100)
+                return current_x
+            else:
+                # This is a leaf node
+                node_positions[node_id] = (x_offset, level * VERTICAL_SPACING + 100)
+                return x_offset + 1  # Leaf nodes take 1 unit width
+
+        # Position all root nodes
+        x_offset = 0
+        for root_id in root_ids:
+            x_offset = position_node(root_id, x_offset, 0)
+
+        # Apply the calculated positions
         updates = []
         with transaction.atomic():
-            for level, node_ids in level_groups.items():
-                y = level * spacing_y + 100
-                total_width = (len(node_ids) - 1) * spacing_x
-                start_x = 600 - total_width / 2
-                for idx, node_id in enumerate(node_ids):
-                    x = start_x + idx * spacing_x
-                    Position.objects.filter(id=node_id).update(
-                        position_x=x, position_y=y
-                    )
-                    updates.append({"id": node_id, "position_x": x, "position_y": y})
+            for node_id, (x, y) in node_positions.items():
+                # Scale x position using the node width and padding
+                x_pos = x * (NODE_WIDTH + HORIZONTAL_PADDING) + 100
+                Position.objects.filter(id=node_id).update(
+                    position_x=x_pos,
+                    position_y=y
+                )
+                updates.append({
+                    "id": node_id,
+                    "position_x": x_pos,
+                    "position_y": y
+                })
 
         return Response(
-            {"message": "Chart organized as tree", "updates": updates},
+            {
+                "message": "Chart organized as hierarchical tree with children under parents",
+                "updates": updates
+            },
             status=status.HTTP_200_OK,
         )
 
