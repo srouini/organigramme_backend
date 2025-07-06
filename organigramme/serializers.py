@@ -58,6 +58,7 @@ class PositionSerializer(FlexFieldsModelSerializer):
             "organigram": ("organigramme.serializers.OrganigramSerializer", {"many": False}),
             "grade": ("organigramme.serializers.GradeSerializer", {"many": False}),
             "parent": ("organigramme.serializers.ParentPositionSerializer", {"many": False}),
+            "edges": ("organigramme.serializers.OrganigramEdgeSerializer", {"many": True}),
         }
     
     def get_parent(self, obj):

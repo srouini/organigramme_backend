@@ -331,11 +331,82 @@ class PositionViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
     """CRUD for Position model + bulk update."""
     queryset = Position.objects.all()
     serializer_class = PositionSerializer
-    permit_list_expands = ['organigram', 'grade']
+    permit_list_expands = ['organigram', 'grade', 'parent']
     permission_classes = [IsAuthenticated]
     filterset_class = PositionFilter
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     search_fields = ['title']
+
+    def create(self, request, *args, **kwargs):
+        mutable_data = request.data.copy()
+        parent_id = mutable_data.pop('parent', None)
+
+        serializer = self.get_serializer(data=mutable_data)
+        serializer.is_valid(raise_exception=True)
+        
+        with transaction.atomic():
+            self.perform_create(serializer)
+            new_position = serializer.instance
+
+            if parent_id:
+                try:
+                    parent_position = Position.objects.get(id=parent_id)
+                    OrganigramEdge.objects.create(
+                        source=parent_position,
+                        target=new_position,
+                        organigram=new_position.organigram
+                    )
+                except Position.DoesNotExist:
+                    return Response({"parent": "Invalid parent ID provided."}, status=status.HTTP_400_BAD_REQUEST)
+                except Exception as e:
+                    return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def update(self, request, *args, **kwargs):
+        mutable_data = request.data.copy()
+        parent_in_request = 'parent' in mutable_data
+        parent_id = mutable_data.pop('parent', None)
+
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=mutable_data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            self.perform_update(serializer)
+
+            if parent_in_request:
+                edge = OrganigramEdge.objects.filter(target=instance).first()
+
+                if parent_id:
+                    try:
+                        if str(instance.id) == str(parent_id):
+                            raise serializers.ValidationError("A position cannot be its own parent.")
+
+                        new_parent_position = Position.objects.get(id=parent_id)
+                        
+                        if edge:
+                            edge.source = new_parent_position
+                            edge.organigram = instance.organigram
+                            edge.save()
+                        else:
+                            OrganigramEdge.objects.create(
+                                source=new_parent_position,
+                                target=instance,
+                                organigram=instance.organigram
+                            )
+                    except Position.DoesNotExist:
+                        return Response({"parent": "Invalid parent ID provided."}, status=status.HTTP_400_BAD_REQUEST)
+                    except Exception as e:
+                        return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    if edge:
+                        edge.delete()
+        
+        instance.refresh_from_db()
+        return Response(self.get_serializer(instance).data)
 
     @action(detail=True, methods=['get'], url_path='generate_pdf')
     def generate_pdf(self, request, pk=None):
@@ -420,6 +491,58 @@ class PositionViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
             return Response(
                 {"detail": "Position not found"},
                 status=status.HTTP_404_NOT_FOUND
+            )
+            
+    @action(detail=True, methods=['post'], url_path='update-edge-source')
+    def update_edge_source(self, request, pk=None):
+        """
+        Update the source of the edge related to this position.
+        Expected payload: {"source_id": <new_source_position_id>}
+        """
+        try:
+            position = self.get_object()
+            new_source_id = request.data.get('source_id')
+            
+            if not new_source_id:
+                return Response(
+                    {"error": "source_id is required in the request payload"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Get the edge where this position is the target
+            edge = OrganigramEdge.objects.filter(
+                target=position,
+                organigram=position.organigram
+            ).first()
+            
+            if not edge:
+                return Response(
+                    {"error": "No edge found for this position"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Get the new source position
+            try:
+                new_source = Position.objects.get(id=new_source_id, organigram=position.organigram)
+            except Position.DoesNotExist:
+                return Response(
+                    {"error": "Source position not found or not in the same organigram"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Update the edge source
+            edge.source = new_source
+            edge.save()
+            
+            return Response({
+                "message": "Edge source updated successfully",
+                "data": OrganigramEdgeSerializer(edge).data
+            })
+            
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
             
     @action(detail=True, methods=['post'], url_path='clone')
