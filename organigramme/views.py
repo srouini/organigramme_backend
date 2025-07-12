@@ -5,31 +5,25 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_flex_fields.views import FlexFieldsMixin
-from .filters import OrganigramFilter, OrganigramEdgeFilter, GradeFilter, PositionFilter, TaskFilter, MissionFilter, CompetenceFilter
+from .filters import *
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
-from .models import Grade, Organigram, Position, OrganigramEdge, Task, Mission, Competence
-from .serializers import (
-    GradeSerializer,
-    OrganigramSerializer,
-    PositionSerializer,
-    OrganigramEdgeSerializer,
-    TaskSerializer,
-    MissionSerializer,
-    CompetenceSerializer
-)
+from .models import *
+from .serializers import *
+from django.contrib.contenttypes.models import ContentType
+
 from src.utils import render_to_pdf_rest
 from django.http import HttpResponse
 
 class GradeViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
     """CRUD for Grade model."""
 
-    queryset = Grade.objects.all().order_by("level")
+    queryset = Grade.objects.all().order_by("id")
     serializer_class = GradeSerializer
     permission_classes = [IsAuthenticated]
     filterset_class = GradeFilter
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    search_fields = ['name','level']
+    search_fields = ['name']
 
     @action(detail=False, methods=['post'])
     def bulk_create(self, request):
@@ -59,13 +53,7 @@ class GradeViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
                     if 'name' not in grade_data or not grade_data['name']:
                         raise ValueError("Name is required")
                         
-                    if 'level' not in grade_data or grade_data['level'] is None:
-                        raise ValueError("Level is required")
-                    
-                    try:
-                        grade_data['level'] = int(grade_data['level'])
-                    except (ValueError, TypeError):
-                        raise ValueError("Level must be a number")
+                  
                     
                     # Set default values for optional fields
                     grade_data.setdefault('color', '#3B82F6')
@@ -75,7 +63,6 @@ class GradeViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
                     # Create the grade
                     Grade.objects.create(
                         name=str(grade_data['name']).strip(),
-                        level=grade_data['level'],
                         color=str(grade_data['color']).strip(),
                         category=str(grade_data['category']).strip(),
                         description=str(grade_data['description']).strip()
@@ -98,29 +85,35 @@ class GradeViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
             
         return Response(response_data, status=status.HTTP_201_CREATED)
 
-class OrganigramViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
-    """CRUD for Organigram model + tree auto‑organize."""
+class StructureViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
+    """CRUD for Structure model + tree auto‑organize."""
 
-    queryset = Organigram.objects.all()
-    serializer_class = OrganigramSerializer
+    queryset = Structure.objects.all()
+    serializer_class = StructureSerializer
     permission_classes = [IsAuthenticated]
-    filterset_class = OrganigramFilter
+    filterset_class = StructureFilter
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    search_fields = ['name','state']
+    search_fields = ['name']
 
+    @action(detail=True, methods=['get'])
+    def tree(self, request, pk=None):
+        """Retrieve the structure as a tree."""
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, expand=['children'])
+        return Response(serializer.data)
 
     @action(detail=True, methods=["post"], url_path="auto-organize")
     def auto_organize(self, request, pk=None):
         """Auto‑organize positions into a tree layout with children under parents."""
-        organigram = self.get_object()
-        positions = Position.objects.filter(organigram=organigram)
-        edges = OrganigramEdge.objects.filter(organigram=organigram).select_related('source', 'target')
+        structure = self.get_object()
+        positions = Position.objects.filter(structure=structure)
+        edges = OrganigramEdge.objects.filter(structure=structure).select_related('source', 'target')
 
         if not positions.exists():
             return Response(
                 {"message": "No positions to organize"}, status=status.HTTP_200_OK
             )
-
+        
         # Build parent-child mappings
         children_map = {}
         parent_map = {}
@@ -331,7 +324,7 @@ class PositionViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
     """CRUD for Position model + bulk update."""
     queryset = Position.objects.all()
     serializer_class = PositionSerializer
-    permit_list_expands = ['organigram', 'grade', 'parent']
+    permit_list_expands = ['structure', 'grade', 'parent']
     permission_classes = [IsAuthenticated]
     filterset_class = PositionFilter
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -354,7 +347,7 @@ class PositionViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
                     OrganigramEdge.objects.create(
                         source=parent_position,
                         target=new_position,
-                        organigram=new_position.organigram
+                        structure=new_position.structure
                     )
                 except Position.DoesNotExist:
                     return Response({"parent": "Invalid parent ID provided."}, status=status.HTTP_400_BAD_REQUEST)
@@ -389,13 +382,13 @@ class PositionViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
                         
                         if edge:
                             edge.source = new_parent_position
-                            edge.organigram = instance.organigram
+                            edge.structure = instance.structure
                             edge.save()
                         else:
                             OrganigramEdge.objects.create(
                                 source=new_parent_position,
                                 target=instance,
-                                organigram=instance.organigram
+                                structure=instance.structure
                             )
                     except Position.DoesNotExist:
                         return Response({"parent": "Invalid parent ID provided."}, status=status.HTTP_400_BAD_REQUEST)
@@ -418,14 +411,14 @@ class PositionViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
 
             edge = OrganigramEdge.objects.filter(
                 target=position,
-                organigram=position.organigram
+                structure=position.structure
             ).select_related('source').first()
             
             context = { 
                 "position" : position,
                 "missions" : missions, 
                 "competences" : competences,
-                "parent" : edge.source
+                "parent" : edge.source if edge else None
             }  
 
             pdf = render_to_pdf_rest('organigramme/fiche_de_poste.html', context)
@@ -471,28 +464,25 @@ class PositionViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
         """
         try:
             position = self.get_object()
-            # Find the edge where this position is the target
             edge = OrganigramEdge.objects.filter(
                 target=position,
-                organigram=position.organigram
+                structure=position.structure
             ).select_related('source').first()
             
             if not edge:
                 return Response(
-                    {"detail": "No parent position found"},
+                    {"detail": "No parent position found"}, 
                     status=status.HTTP_404_NOT_FOUND
                 )
-                
-            # Serialize the parent position
-            serializer = self.get_serializer(edge.source)
-            return Response(serializer.data)
             
+            serializer = PositionSerializer(edge.source, context=self.context)
+            return Response(serializer.data)
         except Position.DoesNotExist:
             return Response(
                 {"detail": "Position not found"},
                 status=status.HTTP_404_NOT_FOUND
             )
-            
+
     @action(detail=True, methods=['post'], url_path='update-edge-source')
     def update_edge_source(self, request, pk=None):
         """
@@ -605,6 +595,131 @@ class PositionViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+class DiagramPositionViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
+    """
+    CRUD for DiagramPosition model.
+    This handles the positions of structures and positions within different diagrams.
+    """
+    serializer_class = DiagramPositionSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['main_structure', 'content_type', 'object_id']
+    
+    def get_queryset(self):
+        queryset = DiagramPosition.objects.all()
+        
+        # Filter by content type and object ID if provided
+        content_type = self.request.query_params.get('content_type')
+        object_id = self.request.query_params.get('object_id')
+        main_structure = self.request.query_params.get('main_structure')
+        
+        if content_type and object_id:
+            try:
+                content_type = ContentType.objects.get(model=content_type.lower())
+                queryset = queryset.filter(
+                    content_type=content_type,
+                    object_id=object_id
+                )
+            except ContentType.DoesNotExist:
+                return DiagramPosition.objects.none()
+                
+        if main_structure:
+            queryset = queryset.filter(main_structure_id=main_structure)
+            
+        return queryset
+    
+    def create(self, request, *args, **kwargs):
+        # Handle creation of a new diagram position
+        data = request.data.copy()
+        
+        # Get the content type and object ID from the request
+        content_type_str = data.get('content_type')
+        object_id = data.get('object_id')
+        main_structure_id = data.get('main_structure')
+        
+        if not all([content_type_str, object_id is not None, main_structure_id]):
+            return Response(
+                {"error": "content_type, object_id, and main_structure are required and cannot be null"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            # Get the content type model
+            content_type = ContentType.objects.get(model=content_type_str.lower())
+            model_class = content_type.model_class()
+            
+            # Convert object_id to integer
+            try:
+                object_id = int(object_id)
+            except (ValueError, TypeError):
+                return Response(
+                    {"error": "object_id must be a valid integer"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Get the object instance to verify it exists
+            try:
+                obj = model_class.objects.get(id=object_id)
+            except model_class.DoesNotExist:
+                return Response(
+                    {"error": f"{content_type.model} with id {object_id} does not exist"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Get the main structure
+            try:
+                main_structure = Structure.objects.get(id=main_structure_id, is_main=True)
+            except Structure.DoesNotExist:
+                return Response(
+                    {"error": f"Main structure with id {main_structure_id} not found or not marked as main"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Check if a position already exists for this object and main structure
+            existing_position = DiagramPosition.objects.filter(
+                content_type=content_type,
+                object_id=object_id,
+                main_structure=main_structure
+            ).first()
+            
+            # Prepare data for the serializer
+            position_data = {
+                'content_type': content_type.model,
+                'object_id': object_id,
+                'main_structure': main_structure.id,
+                'position_x': data.get('position_x', 0),
+                'position_y': data.get('position_y', 0)
+            }
+            
+            if existing_position:
+                # Update the existing position
+                serializer = self.get_serializer(existing_position, data=position_data, partial=True)
+            else:
+                # Create a new position
+                serializer = self.get_serializer(data=position_data)
+            
+            serializer.is_valid(raise_exception=True)
+            self.perform_create(serializer)
+            headers = self.get_success_headers(serializer.data)
+            return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+            
+        except ContentType.DoesNotExist:
+            return Response(
+                {"error": f"Invalid content_type: {content_type_str}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except model_class.DoesNotExist:
+            return Response(
+                {"error": f"{content_type_str} with id {object_id} does not exist"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Structure.DoesNotExist:
+            return Response(
+                {"error": f"Main structure with id {main_structure_id} does not exist or is not a main structure"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+
 class OrganigramEdgeViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
     """CRUD for OrganigramEdge model."""
 
@@ -612,7 +727,7 @@ class OrganigramEdgeViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     filterset_class = OrganigramEdgeFilter
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    search_fields = ['title','level']
+    search_fields = ['title','source','target']
 
     def get_queryset(self):
         organigram_id = self.request.query_params.get("organigram_id")
@@ -632,16 +747,10 @@ class DashboardViewSet(viewsets.ViewSet):
             "total_organigrams": Organigram.objects.count(),
             "total_positions": Position.objects.count(),
             "total_grades": Grade.objects.count(),
-            "organigrams_by_state": {
-                "Draft": Organigram.objects.filter(state="Draft").count(),
-                "Final": Organigram.objects.filter(state="Final").count(),
-                "Archived": Organigram.objects.filter(state="Archived").count(),
-            },
             "recent_organigrams": [
                 {
                     "id": str(org.id),
                     "name": org.name,
-                    "state": org.state,
                     "created_at": org.created_at.isoformat(),
                 }
                 for org in Organigram.objects.order_by("-created_at")[:5]

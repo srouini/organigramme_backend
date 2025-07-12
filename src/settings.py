@@ -123,7 +123,8 @@ WSGI_APPLICATION = 'src.wsgi.application'
 DATABASES = {
      'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'organigramme',
+        #'NAME': 'organigramme',
+        'NAME': 'org',
         'HOST': 'localhost',
         'PORT': 5432,
         'USER': 'rouini',

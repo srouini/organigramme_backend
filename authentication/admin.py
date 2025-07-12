@@ -22,8 +22,8 @@ AVAILABLE_PAGES = [
         'name': 'Grades',
       },
       {
-        'path': '/organigrammes',
-        'name': 'Organigrammes',
+        'path': '/structures',
+        'name': 'structures',
       },
       {
         'path': '/positions',
