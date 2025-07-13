@@ -90,6 +90,7 @@ class StructureViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
 
     queryset = Structure.objects.all()
     serializer_class = StructureSerializer
+    permit_list_expands = ['manager', 'manager.grade', 'positions', 'edges', 'children', 'parent']
     permission_classes = [IsAuthenticated]
     filterset_class = StructureFilter
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]

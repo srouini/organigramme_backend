@@ -189,6 +189,18 @@ class StructureChildrenSerializer(serializers.ModelSerializer):
 class StructureSerializer(FlexFieldsModelSerializer):
     children = StructureChildrenSerializer(many=True, read_only=True)
     parent = serializers.PrimaryKeyRelatedField(queryset=Structure.objects.all(), allow_null=True, required=False)
+    manager = serializers.SerializerMethodField(read_only=True)
+    
+    def get_manager(self, obj):
+        if not obj.manager:
+            return None
+        # Use the PositionSerializer to serialize the manager with grade expanded
+        from .serializers import PositionSerializer
+        return PositionSerializer(
+            obj.manager, 
+            context=self.context,
+            expand=['grade']
+        ).data
     diagram_positions = serializers.SerializerMethodField(read_only=True)
     
     expandable_fields = {
@@ -196,6 +208,7 @@ class StructureSerializer(FlexFieldsModelSerializer):
         "edges": (OrganigramEdgeSerializer, {"many": True}),
         "children": ('organigramme.serializers.StructureSerializer', {"many": True}),
         "parent": ('organigramme.serializers.StructureSerializer', {"many": False}),
+        "manager": ('organigramme.serializers.PositionSerializer', {"many": False, "expand": ["grade"]}),
         "diagram_positions": ("organigramme.serializers.DiagramPositionSerializer", {"many": True}),
     }
 

@@ -28,6 +28,7 @@ class Structure(models.Model):
     is_main = models.BooleanField(default=False)
     name = models.CharField(max_length=255)
     parent = models.ForeignKey('self', on_delete=models.CASCADE, related_name='children', null=True, blank=True)
+    manager = models.ForeignKey('Position', on_delete=models.SET_NULL, related_name='managed_structures', null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -41,6 +42,7 @@ class Structure(models.Model):
 
 class Position(models.Model):
     structure = models.ForeignKey(Structure, on_delete=models.PROTECT, related_name='positions')
+    is_manager = models.BooleanField(default=False, help_text='Whether this position is a manager position')
     title = models.CharField(max_length=255)
     mission_principal = models.TextField(default="")
     abbreviation = models.CharField(max_length=255,null=True,blank=True)
@@ -140,12 +142,10 @@ class DiagramPosition(models.Model):
 class OrganigramEdge(models.Model):
     structure = models.ForeignKey(Structure, on_delete=models.CASCADE, related_name='edges')
 
-    # Source generic relation
     source_content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE, related_name='source_edges')
     source_object_id = models.PositiveIntegerField()
     source = GenericForeignKey('source_content_type', 'source_object_id')
 
-    # Target generic relation
     target_content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE, related_name='target_edges')
     target_object_id = models.PositiveIntegerField()
     target = GenericForeignKey('target_content_type', 'target_object_id')
