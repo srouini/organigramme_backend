@@ -11,6 +11,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from .models import *
 from .serializers import *
 from django.contrib.contenttypes.models import ContentType
+from django.db import transaction
 
 from src.utils import render_to_pdf_rest
 from django.http import HttpResponse
@@ -730,90 +731,135 @@ class DashboardViewSet(viewsets.ViewSet):
 from collections import defaultdict
 
 
-def auto_organize_structure(main_structure_id, x_spacing=400, y_spacing=400):
-    main_structure = Structure.objects.prefetch_related('children__children').get(id=main_structure_id)
+def auto_organize_structure(main_structure_id, x_spacing=300, y_spacing=250):
+    main_structure = Structure.objects.prefetch_related('children', 'positions').get(id=main_structure_id)
+    
+    # Define node dimensions
+    NODE_WIDTH = 150
+    NODE_HEIGHT = 60
+    POSITION_WIDTH = 120
+    POSITION_HEIGHT = 40
 
-    # Use a dictionary to store positions before saving to avoid race conditions
+    # Use a dictionary to store calculated positions to avoid excessive DB writes
     positions = {}
 
-    def set_positions_dfs(node, level=0):
-        # Post-order traversal: process children first
-        children = list(node.children.all())
-        if not children:
-            positions[node.id] = {'x': 0, 'y': level * y_spacing, 'level': level}
-            return
-
-        for child in children:
-            set_positions_dfs(child, level + 1)
-
-        # Position parent over its children
-        first_child_pos = positions[children[0].id]['x']
-        last_child_pos = positions[children[-1].id]['x']
-        parent_x = (first_child_pos + last_child_pos) / 2
-
-        # Initial parent position
-        positions[node.id] = {'x': parent_x, 'y': level * y_spacing, 'level': level}
-
-        # Collision detection and resolution
-        for i in range(len(children) - 1):
-            # Find the rightmost x of the left subtree and leftmost x of the right subtree
-            left_subtree_nodes = get_all_descendants(children[i])
-            right_subtree_nodes = get_all_descendants(children[i+1])
-
-            right_contour_of_left_subtree = max(positions[n.id]['x'] for n in left_subtree_nodes)
-            left_contour_of_right_subtree = min(positions[n.id]['x'] for n in right_subtree_nodes)
-
-            overlap = (right_contour_of_left_subtree + x_spacing) - left_contour_of_right_subtree
-            if overlap > 0:
-                # Shift the entire right subtree to resolve the overlap
-                shift_amount = overlap
-                shift_subtree(children[i+1], shift_amount)
-        
-        # After shifting children, re-center the parent based on the new child positions
-        if children:
-            final_first_child_pos = positions[children[0].id]['x']
-            final_last_child_pos = positions[children[-1].id]['x']
-            positions[node.id]['x'] = (final_first_child_pos + final_last_child_pos) / 2
-
     def get_all_descendants(node):
-        # Helper to get a node and all its children, recursively.
         descendants = [node]
         for child in node.children.all():
             descendants.extend(get_all_descendants(child))
         return descendants
 
+    def get_subtree_extents(node):
+        """
+        Returns (min_x, max_x) for the entire subtree rooted at `node`.
+        Handles both Structure and Position nodes.
+        """
+        key = f"structure-{node.id}"
+        min_x = max_x = positions[key]['x'] if key in positions else 0
+
+        all_descendants = get_all_descendants(node)
+        node_keys = [f"structure-{d.id}" for d in all_descendants]
+        pos_keys = [f"position-{p.id}" for d in all_descendants for p in d.positions.all()]
+        all_keys = node_keys + pos_keys
+        xs = [positions[k]['x'] for k in all_keys if k in positions]
+        if xs:
+            min_x = min(xs)
+            max_x = max(xs)
+        return min_x, max_x
+
     def shift_subtree(node, shift_amount):
-        # Recursively shift a subtree by affecting all its nodes.
         nodes_to_shift = get_all_descendants(node)
         for n in nodes_to_shift:
-            if n.id in positions:
-                positions[n.id]['x'] += shift_amount
+            key = f"structure-{n.id}"
+            if key in positions:
+                positions[key]['x'] += shift_amount
+            # Also shift associated positions
+            for p in n.positions.all():
+                pos_key = f"position-{p.id}"
+                if pos_key in positions:
+                    positions[pos_key]['x'] += shift_amount
 
-    # Start the layout process from the main structure
-    set_positions_dfs(main_structure)
+    def layout_dfs(node, level=0):
+        # Unified children: structures and positions
+        structure_children = list(node.children.all())
+        position_children = list(node.positions.all())
+        all_children = structure_children + position_children
 
-    # Find the minimum x value to shift the whole diagram to be positive
-    min_x = min(pos['x'] for pos in positions.values()) if positions else 0
-    x_offset = -min_x if min_x < 0 else 0
+        # Recursively layout all Structure children
+        for child in structure_children:
+            layout_dfs(child, level + 1)
 
-    # Save positions to the database
-    for node_id, pos in positions.items():
-        node_instance = Structure.objects.get(id=node_id)
-        content_type = ContentType.objects.get_for_model(node_instance)
+        # Assign y position for all children
+        base_y = (level + 1) * (NODE_HEIGHT + y_spacing)
+        for pos in position_children:
+            positions[f"position-{pos.id}"] = {'x': 0, 'y': base_y}
+
+        # Calculate widths
+        child_widths = []
+        for child in all_children:
+            if isinstance(child, Structure):
+                # The width of a structure is the span of its subtree
+                min_x, max_x = get_subtree_extents(child)
+                width = max_x - min_x if max_x > min_x else NODE_WIDTH
+            else:
+                width = POSITION_WIDTH
+            child_widths.append(width)
+
+        # Layout all children horizontally, side by side
+        total_width = sum(child_widths) + (len(all_children) - 1) * x_spacing if all_children else 0
+        start_x = -total_width / 2
+        current_x = start_x
+        for i, child in enumerate(all_children):
+            if isinstance(child, Structure):
+                min_x, max_x = get_subtree_extents(child)
+                width = child_widths[i]
+                center = current_x + width / 2
+                shift = center - positions[f"structure-{child.id}"]['x']
+                shift_subtree(child, shift)
+            else:
+                positions[f"position-{child.id}"]['x'] = current_x + POSITION_WIDTH / 2
+            current_x += child_widths[i] + x_spacing
+
+        # Position the current structure node above its children
+        positions[f"structure-{node.id}"] = {'x': 0, 'y': level * (NODE_HEIGHT + y_spacing)}
+        if all_children:
+            min_x = min(
+                positions[f"structure-{c.id}"]['x'] if isinstance(c, Structure) else positions[f"position-{c.id}"]['x']
+                for c in all_children if f"structure-{getattr(c, 'id', None)}" in positions or f"position-{getattr(c, 'id', None)}" in positions
+            )
+            max_x = max(
+                positions[f"structure-{c.id}"]['x'] if isinstance(c, Structure) else positions[f"position-{c.id}"]['x']
+                for c in all_children if f"structure-{getattr(c, 'id', None)}" in positions or f"position-{getattr(c, 'id', None)}" in positions
+            )
+            positions[f"structure-{node.id}"]['x'] = (min_x + max_x) / 2
+
+
+    # Start layout process
+    layout_dfs(main_structure)
+
+    # Normalize all positions to be positive
+    min_x_overall = min((p['x'] for p in positions.values()), default=0)
+    x_offset = -min_x_overall if min_x_overall < 0 else 0
+
+    # Save all positions to the database in a single transaction
+    structure_content_type = ContentType.objects.get_for_model(Structure)
+    position_content_type = ContentType.objects.get_for_model(Position)
+
+    with transaction.atomic():
+        # Clear old positions for this organigram
+        DiagramPosition.objects.filter(main_structure=main_structure).delete()
         
-        final_x = pos['x'] + x_offset
-        final_y = pos['y']
-
-        position, created = DiagramPosition.objects.get_or_create(
-            content_type=content_type,
-            object_id=node_id,
-            main_structure=main_structure,
-            defaults={'position_x': final_x, 'position_y': final_y}
-        )
-        if not created:
-            position.position_x = final_x
-            position.position_y = final_y
-            position.save()
+        for key, pos in positions.items():
+            obj_type, obj_id = key.split('-')
+            content_type = structure_content_type if obj_type == 'structure' else position_content_type
+            
+            DiagramPosition.objects.create(
+                content_type=content_type,
+                object_id=int(obj_id),
+                main_structure=main_structure,
+                position_x=pos['x'] + x_offset,
+                position_y=pos['y']
+            )
 
 
 from rest_framework.views import APIView
