@@ -111,7 +111,7 @@ class StructureViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
     def tree(self, request, pk=None):
         """Retrieve the structure as a tree."""
         instance = self.get_object()
-        serializer = self.get_serializer(instance, expand=['children'])
+        serializer = self.get_serializer(instance, expand=['children.positions.grade', 'children.manager', 'positions.grade', 'manager'])
         return Response(serializer.data)
 
     @action(detail=True, methods=["post"], url_path="auto-organize")
@@ -730,46 +730,90 @@ class DashboardViewSet(viewsets.ViewSet):
 from collections import defaultdict
 
 
-def build_structure_levels(structure, level=0, levels=None):
-    if levels is None:
-        levels = defaultdict(list)
-    levels[level].append(structure)
-    for child in structure.children.all():
-        build_structure_levels(child, level + 1, levels)
-    return levels
-
 def auto_organize_structure(main_structure_id, x_spacing=400, y_spacing=400):
-    main_structure = Structure.objects.prefetch_related('children').get(id=main_structure_id)
+    main_structure = Structure.objects.prefetch_related('children__children').get(id=main_structure_id)
 
-    # Build tree levels
-    levels = build_structure_levels(main_structure)
+    # Use a dictionary to store positions before saving to avoid race conditions
+    positions = {}
 
-    # Find max number of nodes in any level to define diagram width
-    max_nodes = max(len(nodes) for nodes in levels.values())
-    diagram_width = (max_nodes - 1) * x_spacing if max_nodes > 1 else 0
+    def set_positions_dfs(node, level=0):
+        # Post-order traversal: process children first
+        children = list(node.children.all())
+        if not children:
+            positions[node.id] = {'x': 0, 'y': level * y_spacing, 'level': level}
+            return
 
-    for level, nodes in levels.items():
-        num_nodes = len(nodes)
-        level_width = (num_nodes - 1) * x_spacing if num_nodes > 1 else 0
+        for child in children:
+            set_positions_dfs(child, level + 1)
 
-        # Center this level within the total diagram width
-        x_offset = (diagram_width - level_width) / 2 if num_nodes > 1 else diagram_width / 2
+        # Position parent over its children
+        first_child_pos = positions[children[0].id]['x']
+        last_child_pos = positions[children[-1].id]['x']
+        parent_x = (first_child_pos + last_child_pos) / 2
 
-        for index, node in enumerate(nodes):
-            x = x_offset + index * x_spacing
-            y = level * y_spacing
+        # Initial parent position
+        positions[node.id] = {'x': parent_x, 'y': level * y_spacing, 'level': level}
 
-            content_type = ContentType.objects.get_for_model(node)
-            position, created = DiagramPosition.objects.get_or_create(
-                content_type=content_type,
-                object_id=node.id,
-                main_structure=main_structure,
-                defaults={'position_x': x, 'position_y': y}
-            )
-            if not created:
-                position.position_x = x
-                position.position_y = y
-                position.save()
+        # Collision detection and resolution
+        for i in range(len(children) - 1):
+            # Find the rightmost x of the left subtree and leftmost x of the right subtree
+            left_subtree_nodes = get_all_descendants(children[i])
+            right_subtree_nodes = get_all_descendants(children[i+1])
+
+            right_contour_of_left_subtree = max(positions[n.id]['x'] for n in left_subtree_nodes)
+            left_contour_of_right_subtree = min(positions[n.id]['x'] for n in right_subtree_nodes)
+
+            overlap = (right_contour_of_left_subtree + x_spacing) - left_contour_of_right_subtree
+            if overlap > 0:
+                # Shift the entire right subtree to resolve the overlap
+                shift_amount = overlap
+                shift_subtree(children[i+1], shift_amount)
+        
+        # After shifting children, re-center the parent based on the new child positions
+        if children:
+            final_first_child_pos = positions[children[0].id]['x']
+            final_last_child_pos = positions[children[-1].id]['x']
+            positions[node.id]['x'] = (final_first_child_pos + final_last_child_pos) / 2
+
+    def get_all_descendants(node):
+        # Helper to get a node and all its children, recursively.
+        descendants = [node]
+        for child in node.children.all():
+            descendants.extend(get_all_descendants(child))
+        return descendants
+
+    def shift_subtree(node, shift_amount):
+        # Recursively shift a subtree by affecting all its nodes.
+        nodes_to_shift = get_all_descendants(node)
+        for n in nodes_to_shift:
+            if n.id in positions:
+                positions[n.id]['x'] += shift_amount
+
+    # Start the layout process from the main structure
+    set_positions_dfs(main_structure)
+
+    # Find the minimum x value to shift the whole diagram to be positive
+    min_x = min(pos['x'] for pos in positions.values()) if positions else 0
+    x_offset = -min_x if min_x < 0 else 0
+
+    # Save positions to the database
+    for node_id, pos in positions.items():
+        node_instance = Structure.objects.get(id=node_id)
+        content_type = ContentType.objects.get_for_model(node_instance)
+        
+        final_x = pos['x'] + x_offset
+        final_y = pos['y']
+
+        position, created = DiagramPosition.objects.get_or_create(
+            content_type=content_type,
+            object_id=node_id,
+            main_structure=main_structure,
+            defaults={'position_x': final_x, 'position_y': final_y}
+        )
+        if not created:
+            position.position_x = final_x
+            position.position_y = final_y
+            position.save()
 
 
 from rest_framework.views import APIView
