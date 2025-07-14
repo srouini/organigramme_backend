@@ -15,6 +15,17 @@ from django.contrib.contenttypes.models import ContentType
 from src.utils import render_to_pdf_rest
 from django.http import HttpResponse
 
+class StructureTypeViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
+    """CRUD for Grade model."""
+
+    queryset = StructureType.objects.all().order_by("id")
+    serializer_class = StructureTypeSerializer
+    permission_classes = [IsAuthenticated]
+    filterset_class = StructureTypeFilter
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    search_fields = ['name']
+
+
 class GradeViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
     """CRUD for Grade model."""
 
@@ -90,7 +101,7 @@ class StructureViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
 
     queryset = Structure.objects.all()
     serializer_class = StructureSerializer
-    permit_list_expands = ['manager', 'manager.grade', 'positions', 'edges', 'children', 'parent']
+    permit_list_expands = ['manager', 'manager.grade', 'positions', 'edges', 'children', 'parent','type']
     permission_classes = [IsAuthenticated]
     filterset_class = StructureFilter
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -358,50 +369,7 @@ class PositionViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
-    def update(self, request, *args, **kwargs):
-        mutable_data = request.data.copy()
-        parent_in_request = 'parent' in mutable_data
-        parent_id = mutable_data.pop('parent', None)
-
-        partial = kwargs.pop('partial', False)
-        instance = self.get_object()
-        serializer = self.get_serializer(instance, data=mutable_data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-
-        with transaction.atomic():
-            self.perform_update(serializer)
-
-            if parent_in_request:
-                edge = OrganigramEdge.objects.filter(target=instance).first()
-
-                if parent_id:
-                    try:
-                        if str(instance.id) == str(parent_id):
-                            raise serializers.ValidationError("A position cannot be its own parent.")
-
-                        new_parent_position = Position.objects.get(id=parent_id)
-                        
-                        if edge:
-                            edge.source = new_parent_position
-                            edge.structure = instance.structure
-                            edge.save()
-                        else:
-                            OrganigramEdge.objects.create(
-                                source=new_parent_position,
-                                target=instance,
-                                structure=instance.structure
-                            )
-                    except Position.DoesNotExist:
-                        return Response({"parent": "Invalid parent ID provided."}, status=status.HTTP_400_BAD_REQUEST)
-                    except Exception as e:
-                        return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-                else:
-                    if edge:
-                        edge.delete()
-        
-        instance.refresh_from_db()
-        return Response(self.get_serializer(instance).data)
-
+    
     @action(detail=True, methods=['get'], url_path='generate_pdf')
     def generate_pdf(self, request, pk=None):
         try:
@@ -758,3 +726,58 @@ class DashboardViewSet(viewsets.ViewSet):
             ],
         }
         return Response(stats)
+
+from collections import defaultdict
+
+
+def build_structure_levels(structure, level=0, levels=None):
+    if levels is None:
+        levels = defaultdict(list)
+    levels[level].append(structure)
+    for child in structure.children.all():
+        build_structure_levels(child, level + 1, levels)
+    return levels
+
+def auto_organize_structure(main_structure_id, x_spacing=400, y_spacing=400):
+    main_structure = Structure.objects.prefetch_related('children').get(id=main_structure_id)
+
+    # Build tree levels
+    levels = build_structure_levels(main_structure)
+
+    # Find max number of nodes in any level to define diagram width
+    max_nodes = max(len(nodes) for nodes in levels.values())
+    diagram_width = (max_nodes - 1) * x_spacing if max_nodes > 1 else 0
+
+    for level, nodes in levels.items():
+        num_nodes = len(nodes)
+        level_width = (num_nodes - 1) * x_spacing if num_nodes > 1 else 0
+
+        # Center this level within the total diagram width
+        x_offset = (diagram_width - level_width) / 2 if num_nodes > 1 else diagram_width / 2
+
+        for index, node in enumerate(nodes):
+            x = x_offset + index * x_spacing
+            y = level * y_spacing
+
+            content_type = ContentType.objects.get_for_model(node)
+            position, created = DiagramPosition.objects.get_or_create(
+                content_type=content_type,
+                object_id=node.id,
+                main_structure=main_structure,
+                defaults={'position_x': x, 'position_y': y}
+            )
+            if not created:
+                position.position_x = x
+                position.position_y = y
+                position.save()
+
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+
+
+class AutoOrganizeDiagramView(APIView):
+    def post(self, request, structure_id):
+        auto_organize_structure(structure_id)
+        return Response({"status": "Diagram auto-organized"}, status=status.HTTP_200_OK)

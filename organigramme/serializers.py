@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from rest_flex_fields.serializers import FlexFieldsModelSerializer
 from django.contrib.contenttypes.models import ContentType
-from .models import Structure, Position, Grade, Task, Mission, Competence, OrganigramEdge, DiagramPosition
+from .models import Structure, Position, Grade, Task, Mission, Competence, OrganigramEdge, DiagramPosition, StructureType
 
 class ParentPositionSerializer(serializers.ModelSerializer):
     # This serializer is used to avoid recursion in PositionSerializer
@@ -12,6 +12,13 @@ class ParentPositionSerializer(serializers.ModelSerializer):
 class GradeSerializer(FlexFieldsModelSerializer):
     class Meta:
         model = Grade
+        fields = '__all__'
+        read_only_fields = ("created_at", "updated_at")
+
+
+class StructureTypeSerializer(FlexFieldsModelSerializer):
+    class Meta:
+        model = StructureType
         fields = '__all__'
         read_only_fields = ("created_at", "updated_at")
 
@@ -189,18 +196,7 @@ class StructureChildrenSerializer(serializers.ModelSerializer):
 class StructureSerializer(FlexFieldsModelSerializer):
     children = StructureChildrenSerializer(many=True, read_only=True)
     parent = serializers.PrimaryKeyRelatedField(queryset=Structure.objects.all(), allow_null=True, required=False)
-    manager = serializers.SerializerMethodField(read_only=True)
     
-    def get_manager(self, obj):
-        if not obj.manager:
-            return None
-        # Use the PositionSerializer to serialize the manager with grade expanded
-        from .serializers import PositionSerializer
-        return PositionSerializer(
-            obj.manager, 
-            context=self.context,
-            expand=['grade']
-        ).data
     diagram_positions = serializers.SerializerMethodField(read_only=True)
     
     expandable_fields = {
@@ -210,6 +206,7 @@ class StructureSerializer(FlexFieldsModelSerializer):
         "parent": ('organigramme.serializers.StructureSerializer', {"many": False}),
         "manager": ('organigramme.serializers.PositionSerializer', {"many": False, "expand": ["grade"]}),
         "diagram_positions": ("organigramme.serializers.DiagramPositionSerializer", {"many": True}),
+        "type": ("organigramme.serializers.StructureTypeSerializer", {"many": False}),
     }
 
     class Meta:

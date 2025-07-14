@@ -113,34 +113,39 @@ from django.http import HttpResponse
 #     return HttpResponse("Error generating DOCX", status=500)
     
 def generate_filter_set(selected_model):
-
     class DynamicFilterSetMeta(django_filters.filterset.FilterSetMetaclass):
         def __new__(cls, name, bases, attrs, **kwargs):
             new_class = super().__new__(cls, name, bases, attrs, **kwargs)
-
+            
             # Add methods to handle the "in" lookup for related model ids dynamically
-            for field in new_class.base_filters.values():
+            for field_name, field in list(new_class.base_filters.items()):
                 if isinstance(field, django_filters.filters.BaseInFilter):
                     related_model = field.field.related_model
                     method_name = f'filter_{related_model.__name__.lower()}_ids'
-
+                    
                     def filter_related_model_ids(queryset, name, value, related_model=related_model):
                         return queryset.filter(**{f'{name}__id__in': value})
-
-
-                    # Attach the "in" lookup handler to the DynamicFilterSet
+                    
                     setattr(new_class, method_name, filter_related_model_ids)
-
+                
+                # Add support for isnull lookups on foreign keys
+                if '__' in field_name and field_name.endswith('__isnull'):
+                    base_field_name = field_name.rsplit('__', 1)[0]
+                    field = getattr(selected_model, base_field_name, None)
+                    if field and hasattr(field, 'field') and isinstance(field.field, models.ForeignKey):
+                        new_class.base_filters[field_name] = django_filters.BooleanFilter(
+                            field_name=base_field_name,
+                            lookup_expr='isnull'
+                        )
+            
             return new_class
     
-    class DynamicFilterSet(django_filters.FilterSet,metaclass=DynamicFilterSetMeta):
+    class DynamicFilterSet(django_filters.FilterSet, metaclass=DynamicFilterSetMeta):
         class Meta:
             model = selected_model
             fields = []
 
-
     def add_filters(selected_model, prefix='', processed_models=None):
-        
         if processed_models is None:
             processed_models = set()
 
@@ -154,161 +159,83 @@ def generate_filter_set(selected_model):
             label_base = field.verbose_name.capitalize() if field.verbose_name else field.name.replace('_', ' ').capitalize()
 
             if isinstance(field, models.ForeignKey):
+                # Add the basic foreign key filter
+                DynamicFilterSet.base_filters[filter_name] = django_filters.ModelChoiceFilter(
+                    field_name=filter_name,
+                    queryset=field.related_model.objects.all(),
+                    label=label_base
+                )
+                
+                # Add isnull filter for foreign keys
+                DynamicFilterSet.base_filters[f'{filter_name}__isnull'] = django_filters.BooleanFilter(
+                    field_name=filter_name,
+                    lookup_expr='isnull',
+                    label=f'{label_base} is null'
+                )
+                
                 # Recursive call for related fields
-                add_filters(field.related_model, f'{filter_name}__',processed_models)
+                add_filters(field.related_model, f'{filter_name}__', processed_models)
+                
                 # Add an "in" lookup for related model ids
                 DynamicFilterSet.base_filters[f'{filter_name}__in'] = django_filters.BaseInFilter(
                     field_name=f'{filter_name}__id',
                     lookup_expr='in',
-                    label=f"{label_base} (in list)"
+                    label=f'{label_base} (in)'
+                )
+                DynamicFilterSet.base_filters[f'{filter_name}__id__in'] = django_filters.BaseInFilter(
+                    field_name=f'{filter_name}__id',
+                    lookup_expr='in',
+                    label=f'{label_base} ID (in)'
+                )
+            elif isinstance(field, (models.CharField, models.TextField)):
+                DynamicFilterSet.base_filters[filter_name] = django_filters.CharFilter(
+                    field_name=filter_name,
+                    lookup_expr='icontains',
+                    label=label_base
+                )
+            elif isinstance(field, (models.IntegerField, models.AutoField, models.BigAutoField)):
+                DynamicFilterSet.base_filters[filter_name] = django_filters.NumberFilter(
+                    field_name=filter_name,
+                    label=label_base
+                )
+                DynamicFilterSet.base_filters[f'{filter_name}__lt'] = django_filters.NumberFilter(
+                    field_name=filter_name,
+                    lookup_expr='lt',
+                    label=f'{label_base} (less than)'
+                )
+                DynamicFilterSet.base_filters[f'{filter_name}__gt'] = django_filters.NumberFilter(
+                    field_name=filter_name,
+                    lookup_expr='gt',
+                    label=f'{label_base} (greater than)'
+                )
+            elif isinstance(field, models.BooleanField):
+                DynamicFilterSet.base_filters[filter_name] = django_filters.BooleanFilter(
+                    field_name=filter_name,
+                    label=label_base
+                )
+            elif isinstance(field, (models.DateField, models.DateTimeField)):
+                DynamicFilterSet.base_filters[filter_name] = django_filters.DateFilter(
+                    field_name=filter_name,
+                    label=label_base
+                )
+                DynamicFilterSet.base_filters[f'{filter_name}__lt'] = django_filters.DateFilter(
+                    field_name=filter_name,
+                    lookup_expr='lt',
+                    label=f'{label_base} (before)'
+                )
+                DynamicFilterSet.base_filters[f'{filter_name}__gt'] = django_filters.DateFilter(
+                    field_name=filter_name,
+                    lookup_expr='gt',
+                    label=f'{label_base} (after)'
                 )
             else:
-                if isinstance(field, models.CharField):
-                    DynamicFilterSet.base_filters[filter_name + '__icontains'] = django_filters.CharFilter(
-                        field_name=filter_name, lookup_expr='icontains',
-                        label=f"{label_base} (contains, case-insensitive)"
-                    )
-                    DynamicFilterSet.base_filters[filter_name + '__exact'] = django_filters.CharFilter(
-                        field_name=filter_name, lookup_expr='exact',
-                        label=f"{label_base} (exact, case-sensitive)"
-                    )
+                DynamicFilterSet.base_filters[filter_name] = django_filters.CharFilter(
+                    field_name=filter_name,
+                    label=label_base
+                )
 
-                elif isinstance(field, models.FloatField) or isinstance(field, models.DecimalField) or isinstance(field, models.IntegerField):
-                    DynamicFilterSet.base_filters[filter_name] = django_filters.NumberFilter(
-                        field_name=filter_name, lookup_expr='exact',
-                        label=label_base
-                    )
-                    DynamicFilterSet.base_filters[f'{filter_name}__gt'] = django_filters.NumberFilter(
-                        field_name=filter_name, lookup_expr='gt',
-                        label=f"{label_base} (greater than)"
-                    )
-                    DynamicFilterSet.base_filters[f'{filter_name}__lt'] = django_filters.NumberFilter(
-                        field_name=filter_name, lookup_expr='lt',
-                        label=f"{label_base} (less than)"
-                    )
-                    DynamicFilterSet.base_filters[f'{filter_name}__gte'] = django_filters.NumberFilter(
-                        field_name=filter_name, lookup_expr='gte',
-                        label=f"{label_base} (greater than or equal)"
-                    )
-                    DynamicFilterSet.base_filters[f'{filter_name}__lte'] = django_filters.NumberFilter(
-                        field_name=filter_name, lookup_expr='lte',
-                        label=f"{label_base} (less than or equal)"
-                    )
-                elif isinstance(field, models.DateTimeField):
-                    DynamicFilterSet.base_filters[f'{filter_name}__date'] = django_filters.DateFilter(
-                        field_name=filter_name, lookup_expr='date',
-                        label=f"{label_base} (date is)"
-                    )
-                    DynamicFilterSet.base_filters[f'{filter_name}__date__gt'] = django_filters.DateFilter(
-                        field_name=filter_name, lookup_expr='date__gt',
-                        label=f"{label_base} (date after)"
-                    )
-                    DynamicFilterSet.base_filters[f'{filter_name}__date__lt'] = django_filters.DateFilter(
-                        field_name=filter_name, lookup_expr='date__lt',
-                        label=f"{label_base} (date before)"
-                    )
-                    DynamicFilterSet.base_filters[f'{filter_name}__date__gte'] = django_filters.DateFilter(
-                        field_name=filter_name, lookup_expr='date__gte',
-                        label=f"{label_base} (date on or after)"
-                    )
-                    DynamicFilterSet.base_filters[f'{filter_name}__date__lte'] = django_filters.DateFilter(
-                        field_name=filter_name, lookup_expr='date__lte',
-                        label=f"{label_base} (date on or before)"
-                    )
-                elif isinstance(field, models.DateField):
-                    DynamicFilterSet.base_filters[filter_name] = django_filters.DateFilter(
-                        field_name=filter_name, lookup_expr='exact',
-                        label=label_base
-                    )
-                    DynamicFilterSet.base_filters[f'{filter_name}__gt'] = django_filters.DateFilter(
-                        field_name=filter_name, lookup_expr='gt',
-                        label=f"{label_base} (after)"
-                    )
-                    DynamicFilterSet.base_filters[f'{filter_name}__lt'] = django_filters.DateFilter(
-                        field_name=filter_name, lookup_expr='lt',
-                        label=f"{label_base} (before)"
-                    )
-                    DynamicFilterSet.base_filters[f'{filter_name}__gte'] = django_filters.DateFilter(
-                        field_name=filter_name, lookup_expr='gte',
-                        label=f"{label_base} (on or after)"
-                    )
-                    DynamicFilterSet.base_filters[f'{filter_name}__lte'] = django_filters.DateFilter(
-                        field_name=filter_name, lookup_expr='lte',
-                        label=f"{label_base} (on or before)"
-                    )
-
-                elif isinstance(field, models.BooleanField):
-                    DynamicFilterSet.base_filters[filter_name] = django_filters.BooleanFilter(
-                        field_name=filter_name,
-                        label=label_base
-                    )
-                else: # Default for other field types, e.g. TextField, EmailField
-                    DynamicFilterSet.base_filters[filter_name + '__icontains'] = django_filters.CharFilter(
-                        field_name=filter_name, lookup_expr='icontains',
-                        label=f"{label_base} (contains, case-insensitive)"
-                    )
-                    DynamicFilterSet.base_filters[filter_name + '__exact'] = django_filters.CharFilter(
-                        field_name=filter_name, lookup_expr='exact',
-                        label=f"{label_base} (exact, case-sensitive)"
-                    )
-  
-                if not isinstance(field, models.BooleanField):
-                    DynamicFilterSet.base_filters[f'{filter_name}__isnull'] = django_filters.BooleanFilter(
-                        field_name=filter_name, lookup_expr='isnull',
-                        label=f"{label_base} (is null)"
-                    )
-                    
-        # Check for app-specific custom filters
-        try:
-            # Determine which app this model belongs to
-            app_label = selected_model._meta.app_label
-            model_name = selected_model._meta.model_name
-            
-            # Dynamically import the app's filters module
-            try:
-                # First attempt with direct app name
-                filters_module = __import__(f"{app_label}.filters", fromlist=['*'])
-            except ImportError:
-                # Try with backend.app_name path
-                try:
-                    filters_module = __import__(f"backend.{app_label}.filters", fromlist=['*'])
-                except ImportError:
-                    # No filters module found for this app
-                    filters_module = None
-            
-            # If we found a filters module, look for model-specific custom filters
-            if filters_module:
-                # Look for a function named register_MODEL_custom_filters
-                custom_filters_func = getattr(filters_module, f"register_{model_name}_custom_filters", None)
-                
-                if custom_filters_func and callable(custom_filters_func):
-                    # Call the function, passing the DynamicFilterSet class to allow it to register filters
-                    custom_filters_func(DynamicFilterSet)
-        except (ImportError, AttributeError) as e:
-            # Unable to import app-specific filters, log if needed
-            pass
     add_filters(selected_model)
-
-    # Expmale of usage : http://localhost:8000/order/api/note/?category__or=VIANDE,BOISSON,SALADE
-    #In this exmple we are trying to request the categories where category is equale to VIANDE OR BOISSON OR SAlADE 
-    def filter_title_or(queryset, name, value):
-        values = value.split(',')  # Split input into a list of values
-        filters = Q()  # Initialize an empty Q object
-
-        for val in values:
-            filters |= Q(**{f'status__icontains': val.strip()})
-
-        return queryset.filter(filters)
-
-    # Add the custom filter to DynamicFilterSet
-    DynamicFilterSet.base_filters['status__or'] = django_filters.CharFilter(
-        method=filter_title_or,
-        label='Status (OR, contains, comma-separated)'
-    )
-
-
     return DynamicFilterSet
-
 
 def get_filters(model):
     filter_set  = generate_filter_set(model)

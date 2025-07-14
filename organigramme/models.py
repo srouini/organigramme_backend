@@ -23,11 +23,25 @@ class Grade(models.Model):
     def __str__(self):
         return f"{self.name}"
 
+class StructureType(models.Model):
+    name = models.CharField(max_length=255)
+    color = models.CharField(max_length=7, default='#3B82F6')  # Hex color
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['created_at']
+        unique_together = ['name']
+
+    def __str__(self):
+        return self.name
 
 class Structure(models.Model):
     is_main = models.BooleanField(default=False)
+    initial_node = models.BooleanField(default=False)
     name = models.CharField(max_length=255)
     parent = models.ForeignKey('self', on_delete=models.CASCADE, related_name='children', null=True, blank=True)
+    type = models.ForeignKey('StructureType', on_delete=models.CASCADE, related_name='structure_type', null=True, blank=True)
     manager = models.ForeignKey('Position', on_delete=models.SET_NULL, related_name='managed_structures', null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -41,7 +55,7 @@ class Structure(models.Model):
 
 
 class Position(models.Model):
-    structure = models.ForeignKey(Structure, on_delete=models.PROTECT, related_name='positions')
+    structure = models.ForeignKey(Structure, on_delete=models.PROTECT, related_name='positions',null=True,blank=True)
     is_manager = models.BooleanField(default=False, help_text='Whether this position is a manager position')
     title = models.CharField(max_length=255)
     mission_principal = models.TextField(default="")
@@ -64,7 +78,7 @@ class Position(models.Model):
         ]
     
     def __str__(self):
-        return f"{self.title} - {self.structure.name}"
+        return f"{self.title}"
 
 
 class Task(models.Model):
