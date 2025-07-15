@@ -731,11 +731,11 @@ class DashboardViewSet(viewsets.ViewSet):
 from collections import defaultdict
 
 
-def auto_organize_structure(main_structure_id, x_spacing=300, y_spacing=250):
+def auto_organize_structure(main_structure_id, x_spacing=200, y_spacing=500):
     main_structure = Structure.objects.prefetch_related('children', 'positions').get(id=main_structure_id)
     
     # Define node dimensions
-    NODE_WIDTH = 150
+    NODE_WIDTH = 300
     NODE_HEIGHT = 60
     POSITION_WIDTH = 120
     POSITION_HEIGHT = 40
