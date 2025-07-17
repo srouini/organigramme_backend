@@ -374,15 +374,25 @@ class PositionViewSet(FlexFieldsMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path='generate_pdf')
     def generate_pdf(self, request, pk=None):
         try:
-
+            from django.contrib.contenttypes.models import ContentType
+            
             position = Position.objects.get(id=pk) 
             missions = Mission.objects.filter(position=position)
             competences = Competence.objects.filter(position=position)
 
+            # Get the content type for Position model
+            position_type = ContentType.objects.get_for_model(position)
+            
+            # Query using target_content_type and target_object_id
             edge = OrganigramEdge.objects.filter(
-                target=position,
+                target_content_type=position_type,
+                target_object_id=position.id,
                 structure=position.structure
-            ).select_related('source').first()
+            ).first()
+            
+            # If edge exists, prefetch the source
+            if edge and edge.source_content_type:
+                edge.source = edge.source_content_type.get_object_for_this_type(pk=edge.source_object_id)
             
             context = { 
                 "position" : position,
@@ -731,7 +741,7 @@ class DashboardViewSet(viewsets.ViewSet):
 from collections import defaultdict
 
 
-def auto_organize_structure(main_structure_id, x_spacing=200, y_spacing=500):
+def auto_organize_structure(main_structure_id, x_spacing=250, y_spacing=500):
     main_structure = Structure.objects.prefetch_related('children', 'positions').get(id=main_structure_id)
     
     # Define node dimensions

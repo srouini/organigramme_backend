@@ -221,7 +221,7 @@ class StructureSerializer(FlexFieldsModelSerializer):
         diagram_positions = obj.diagram_positions.all()
         return DiagramPositionSerializer(diagram_positions, many=True, context=self.context).data
 
-    def validate_name(self, value):
-        if Structure.objects.filter(name__iexact=value).exclude(id=self.instance.id if self.instance else None).exists():
-            raise serializers.ValidationError("This name already exists.")
-        return value
+    # def validate_name(self, value):
+    #     if Structure.objects.filter(name__iexact=value).exclude(id=self.instance.id if self.instance else None).exists():
+    #         raise serializers.ValidationError("This name already exists.")
+    #     return value

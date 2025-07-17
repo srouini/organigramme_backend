@@ -48,7 +48,7 @@ class Structure(models.Model):
     
     class Meta:
         ordering = ['created_at']
-        unique_together = ['name']
+
 
     def __str__(self):
         return self.name
@@ -58,10 +58,10 @@ class Position(models.Model):
     structure = models.ForeignKey(Structure, on_delete=models.PROTECT, related_name='positions',null=True,blank=True)
     is_manager = models.BooleanField(default=False, help_text='Whether this position is a manager position')
     title = models.CharField(max_length=255)
-    mission_principal = models.TextField(default="")
+    mission_principal = models.TextField(default="",blank=True)
     abbreviation = models.CharField(max_length=255,null=True,blank=True)
-    formation = models.CharField(max_length=255,default="")
-    experience = models.CharField(max_length=255,default="")
+    formation = models.CharField(max_length=255,default="",blank=True)
+    experience = models.CharField(max_length=255,default="",blank=True)
     grade = models.ForeignKey(Grade,on_delete=models.PROTECT, related_name='grades',max_length=255)  # Store grade name
     category = models.CharField(max_length=20,blank=True,null=True)  # Hex color
     quantity = models.IntegerField(default=1)
